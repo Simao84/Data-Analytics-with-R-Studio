@@ -1,0 +1,1238 @@
+---
+title: 'Tourism Dynamics and Weather Impact on Tourist Arrivals in Switzerland'
+author: "Simao Garcia"
+date: "2024-09-20"
+output:
+  html_document:
+    number_sections: yes
+    theme: lumen
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+    toc_collapsed: yes
+    toc_depth: 3
+    toc-title: Table of Content
+  minidown::mini_document:
+    result_folding: show
+  pdf_document:
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+Tourism is a key sector in Switzerland economy, attracting millions of visitors annually due to its scenic landscapes, outdoor activities, and historical landmarks. Understanding the tourism dynamic, and factors that influence tourist arrivals can provide valuable insights for both policymakers and businesses within the tourism industry. 
+
+## Aim of Project
+The aim of this project is to analyze tourist arrival trends in Switzerland across different cantons and how weather patterns influence tourist behavior between 2005 and 2023. In order to achieve this, we focused on addressing the following questions:
+
+1. How has tourism evolved from 2005 to 2023?
+
+2. Which continent provides the highest number of tourists to Switzerland?
+
+3. Which ten countries are the top sources of tourists to Switzerland?
+
+4. Which season has the highest total tourist arrivals in Switzerland, and how do domestic and international arrivals compare across the seasons?
+
+5.	How have domestic and international tourist arrivals in Switzerland changed over time, and what was the impact of the COVID-19 pandemic on these trends?
+
+6.	What are the most visited cantons in Switzerland by domestic and international tourists? And which cantons have the least arrivals?
+
+7.	What is the total number of domestic tourist arrivals compared to international tourist arrivals? And which group of tourists (domestic or international) had more total arrivals in Switzerland?
+
+8.	Which  cantons  are  the  most  and  least  popular  among  international  tourists  during  different  seasons?
+
+9. Do tourists, both domestic and international, prefer Switzerland's Alpine regions or its urban areas, and how do these preferences vary by season?
+
+10. How does the weather impact tourist dynamics in Switzerland?
+
+
+# Required R-Packages
+
+For the data processing, visualization and analysis we used following packages (click on show bottom to see the packages): 
+
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+library(corrplot)
+library(explore)
+```
+
+# Data Preparation
+
+The weather data is provided by the [Federal Office of Meteorology and Climatology Meteo Swiss](https://www.meteoswiss.admin.ch/#tab=forecast-map) and the hotel tourist arrivals in Switherland data by  [Federal Statistical Office (STAT-TAB)](https://www.pxweb.bfs.admin.ch/pxweb/en/px-x-1003020000_102/-/px-x-1003020000_102.px/)
+
+## Proccessing of the Weather Data
+
+We have data from 14 different weather stations (locations mentioned in Chapter 5.12), covering the major climatic regions of Switzerland. These data contain long-term, homogeneous series of monthly average values for temperature and total precipitation.
+ 
+The climate data from 14 different weather stations are stored in .txt files. In a first step, we listed all txt. files in a directory and assigned the files to the cantons of the corresponding weather stations. In a second step, we processed the txt. files in a for loop as follows:
+  
+  1. Reading and extracting the data starting from the **Year** header
+  2. Adding the **canton** name to each dataset
+  3. Filtering data to include only the **years** between 2005 and 2023
+
+The results is a list of data frames, each presenting cleaned weather data from a specific canton. 
+
+```{r weather data, message=FALSE, warning=FALSE}
+# Weather datas from 14 different weather station 
+# List all .txt files in the directory 
+lists <- list.files(pattern = "\\.txt$")
+
+# Mapping filenames to canton names
+canton_mapping <- list(
+  "climate-reports-tables-homogenized_ALT.txt" = "Uri",
+  "climate-reports-tables-homogenized_BAS.txt" = "Basel-Landschaft", 
+  "climate-reports-tables-homogenized_BER.txt" = "Bern",
+  "climate-reports-tables-homogenized_DAV.txt" = "Graubunden",
+  "climate-reports-tables-homogenized_ELM.txt" = "Glarus",
+  "climate-reports-tables-homogenized_ENG.txt" = "Obwalden",
+  "climate-reports-tables-homogenized_GVE.txt" = "Geneva",
+  "climate-reports-tables-homogenized_LUG.txt" = "Ticino",
+  "climate-reports-tables-homogenized_LUZ.txt" = "Lucerne",
+  "climate-reports-tables-homogenized_NEU.txt" = "Neuchâtel",
+  "climate-reports-tables-homogenized_PAY.txt" = "Vaud",
+  "climate-reports-tables-homogenized_SIO.txt" = "Valais",
+  "climate-reports-tables-homogenized_SMA.txt" = "Zurich",
+  "climate-reports-tables-homogenized_STG.txt" = "St. Gallen")
+
+# Initialize an empty list to store datasets
+datasets <- list()
+
+# Loop over each file in the list
+for (filename in lists) {
+  
+  # Read the entire file to identify the starting line
+  lines <- readLines(filename)
+  
+  # Find the line number where the word "Year" starts
+  start_line <- grep("^Year", lines)[1]
+  
+  # Read the file into a dataframe, skipping lines up to 'start_line - 1'
+  datasets[[filename]] <- read.table(file = filename,
+                                     header = TRUE,
+                                     skip = start_line  -1)
+  
+  # Get the corresponding canton name from the mapping
+  canton_name <- canton_mapping[[filename]]
+  
+  # Add the canton name as a new column to the dataset
+  datasets[[filename]]$Canton <- canton_name
+  
+  # Ensure that the dataset has a 'Year' column
+  if ("Year" %in% colnames(datasets[[filename]])) {
+    
+    # Filter the data to include only rows where Year is between 2005 and 2023
+    datasets[[filename]] <- subset(datasets[[filename]], Year >= 2005 & 
+                                     Year <= 2023)
+    
+  } else {
+    warning(paste("No 'Year' column found in file:", filename))
+  }
+}
+
+# Check the structure of one dataset to verify the new column
+str(datasets[[1]])
+```
+
+
+Finally, all the individual data frames in the dataset list are combined into one large data frame and then converted into a tibble. 
+
+```{r Create large data frame}
+# Bind rows (combines them into one large data frame)
+d.temp <- bind_rows(datasets) %>%
+  as_tibble()
+print(d.temp)
+```
+
+##  Proccessing of the Tourist Arrivals
+
+The dataset contains information on tourist arrivals in hotels by **year**, **month**, **canton** and **country of residence** of the visitors. 
+
+The initial dataset had to be transformed with the following steps:
+
+  1. Skipping the first three rows to remove the heading
+  2. Extracting and handling the column names
+  3. Filling missing column names with the names **Year", Year_1, Month_num, Month, Row_numbers, Canton**
+  4. Replacing missing names and assigning column names to the data frame 
+  5. Filling missing values in specific columns: **Year, Year_1, Month_num, Month**
+  6. Converting relevant string columns to numeric except **Month** and **Canton**
+  7. Pivoting the data from wide to long format
+
+```{r Extracting and Handling Column Names, message=FALSE, warning=FALSE, results='hide'}
+# Skip the first three rows of the excel sheet to remove the titel 
+d.hotel <- read_excel("Hotel.new.xlsx", skip = 3)
+
+# Store the column names from the raw 3 (the first 6 columns are without names)
+d.hotel.names <- read_excel("Hotel.new.xlsx", skip = 2) %>%
+  colnames()
+d.hotel.names
+
+colnames(d.hotel.names)
+
+# Create a vector with missing column names for the 1st 6 columns from raw 3/4
+#  raw number 4 
+add_names <- c("Year","Year_1","Month_num", "Month", "Row_numbers","Canton")
+
+# Join both vector names 
+d.hotel.names[1:6] <- add_names
+
+# Assigns the values from d.hotel.names to the d.hotel data frame.
+colnames(d.hotel) <- d.hotel.names 
+
+head(d.hotel)
+str(d.hotel)
+
+d.hotel_filled <- d.hotel %>%
+  fill(Year, Year_1, Month_num, Month, .direction = "down")
+
+write.csv(d.hotel_filled, "transformed.csv",  row.names = FALSE)
+
+# Load the dataset
+data <- read.csv("transformed.csv")
+
+
+# Convert only relevant strings to numerical values without affecting the 
+# month and canton
+data <- data %>%
+  mutate(across(where(is.character) & !c("Month", "Canton"), as.numeric))
+
+# Transform the dataset from wide to long format
+d.data_1 <- data %>%
+  pivot_longer(
+    cols = -c(Year, Year_1, Month_num, Month, Row_numbers, Canton), 
+    names_to = "Country", 
+    values_to = "Arrivals"
+  )
+
+```
+
+```{r Check data frame}
+# Check the data frame
+head(d.data_1, 10)
+```
+
+
+We have added additional columns for analysing the data later:
+
+  1. Creating a **Day** and **Date** column
+  2. Creating a **Season** column based on the **Month_num** column
+  3. Creating an **Origin** column based on the **Country** column
+  4. Creating a **Continent** column based on the **Country** column
+  
+Finally, we have created a data frame for tourist arrivals that contains only the variables we need for the analysis
+
+
+```{r Create additional columns, message=FALSE, warning=FALSE, results='hide'}
+# Check the data frame
+# Create the 'Date' column in the format dd.mm.yyyy
+d.date <- d.data_1 %>%
+  mutate(
+    Day = "01",  # Assuming day "01" for all rows, or use an existing day column if you have it
+    Date = paste(Day, Month_num, Year, sep = ".")
+  )
+
+# Convert the Date column to a Date object to ensure it's recognized as a date
+d.date$Date <- as.Date(d.date$Date, format = "%d.%m.%Y")
+
+head(d.date)
+
+# Create a 'Season' column based on the 'month_num'
+d.season <- d.date %>%
+  mutate(Season = case_when(
+    Month_num %in% c(12, 1, 2) ~ "Winter",
+    Month_num %in% c(3, 4, 5) ~ "Spring",
+    Month_num %in% c(6, 7, 8) ~ "Summer",
+    Month_num %in% c(9, 10, 11) ~ "Autumn"
+  ))
+
+
+# Create a 'Origin' column based on the 'Country'
+d.origin <- d.season %>%
+  mutate(Origin = ifelse(Country == "Switzerland", "Domestic", "International"))
+
+str(d.origin)
+
+# Create a 'Continent' column based on the 'Countries'
+country_to_continent <- c(
+  # Europe
+  Switzerland = "Europe", `Baltic.States` = "Europe", Germany = "Europe", France = "Europe", 
+  Italy = "Europe", Austria = "Europe", `United.Kingdom` = "Europe", Irland = "Europe", 
+  Netherlands = "Europe", Belgium = "Europe", Luxembourg = "Europe", Denmark = "Europe", 
+  Sweden = "Europe", Norway = "Europe", Finland = "Europe", Spain = "Europe", Portugal = "Europe", 
+  Greece = "Europe", Turkey = "Europe", Liechtenstein = "Europe", Iceland = "Europe", 
+  Poland = "Europe", Hungary = "Europe", Belarus = "Europe", Bulgaria = "Europe", 
+  Malta = "Europe", Cyprus = "Europe", `Other.European.countries` = "Europe", 
+  Estonia = "Europe", Latvia = "Europe", Lithuania = "Europe", `Serbia.and.Montenegro` = "Europe", 
+  Croatia = "Europe", Romania = "Europe", Russia = "Europe", Slovakia = "Europe", 
+  Slovenia = "Europe", Czechia = "Europe", Ukraine = "Europe", Serbia = "Europe",
+  # North America
+  `United.States` = "North America", Canada = "North America", Mexico = "North America", 
+  `Central.America..Caribbean` = "North America", `Other.Central.American.countries` = "North America",
+  # South America
+  Chile = "South America", Brazil = "South America", Argentina = "South America", 
+  `Other.South.American.countries` = "South America",
+  # Africa
+  Egypt = "Africa", `Other.North.African.countries` = "Africa", `South.Africa` = "Africa", 
+  `Other.African.countries` = "Africa",
+  # Asia
+  Bahrain = "Asia", Israel = "Asia", India = "Asia", Japan = "Asia", 
+  `Other.South.East.Asian.countries` = "Asia", Qatar = "Asia", Kuwait = "Asia", China = "Asia", 
+  `Gulf.States` = "Asia", `Hong.Kong` = "Asia", Indonesia = "Asia", `South.Korea` = "Asia", 
+  Malaysia = "Asia", Philippines = "Asia", Singapore = "Asia", Oman = "Asia", 
+  `Taiwan..Chinese.Taipei.` = "Asia", Thailand = "Asia", `Other.West.Asian.countries` = "Asia", 
+  `Saudi.Arabia` = "Asia", `United.Arab.Emirates` = "Asia",
+  # Oceania
+  Australia = "Oceania", `Australia..New.Zealand..Oceania` = "Oceania", 
+  `New.Zealand..Oceania` = "Oceania"
+)
+
+d.continent <- d.origin %>% 
+  mutate(Continent = country_to_continent[Country])
+print(d.continent)
+
+# Check NA and identify rows with any NA values
+any(is.na(d.continent$Continent))
+
+# Create the final data frame for the tourist arrivals
+d.arrivals <- d.continent[, c("Day","Year","Month_num","Month","Date","Canton",
+                          "Country","Arrivals", "Origin", "Continent", "Season")]
+```
+
+```{r message=FALSE, warning=FALSE}
+# Check dataset  
+str(d.arrivals)
+```
+
+
+## Merging the data frame
+
+The two modified data frames of weather data and tourist arrivals are merged. This data frame contains now 13 variables and 456456 observations (click on show bottom below to view the merging code). Below, we can see the structure of the merged data frame, along with a table describing the variables.
+
+```{r Merge, message=FALSE, warning=FALSE, results='hide'}
+# Merge the datasets by the ID column 
+colnames(d.arrivals)
+colnames(d.temp)
+d.weather.tourist <- full_join(d.arrivals, d.temp, by = c("Year" = "Year", 
+                                                          "Month_num" = "Month", 
+                                                          "Canton" = "Canton"))
+# Check dataset
+d.weather.tourist
+unique(d.weather.tourist$Canton)
+```
+
+```{r message=FALSE, warning=FALSE}
+str(d.weather.tourist)
+```
+
+| Column        | Description                                                   |
+|---------------|---------------------------------------------------------------|
+| Day           | The day of the month                                          |
+| Year          | The year of the observation                                   |
+| Month_num     | The numerical representation of the month                     |
+| Month         | The name of the month.                                        |
+| Date          | The full date (in YYYY-MM-DD format)                          |
+| Canton        | The Swiss canton where the tourist arrivals were registered   |
+| Country       | The country of origin for the tourists                        |
+| Arrivals      | The number of tourist arrivals                                |
+| Origin        | Whether the tourists are "Domestic" or "International"        |
+| Continent     | The continent of the tourists' origin                         |
+| Season        | The season in which the arrivals were registered              |
+| Temperature   | The recorded temperature in "°C" for each canton              |
+| Precipitation | The recorded precipitation in mm (millimeter) for the canton  |
+
+
+## Data Cleaning
+
+Most NA values can be found in the **Temperature** and **Precipitation** columns, as data is only available for 14 cantons. When cleaning the data, we only removed the NA values in the arrival column so as not to lose the arrival data for the cantons for which we have no weather data. 
+
+```{r Check NA values,  echo=FALSE, results='hide'}
+# Check if there are any NA values in the data frame
+any(is.na(d.weather.tourist))
+
+# Count the total number of NA values in the data frame
+sum(is.na(d.weather.tourist))
+
+# Count the number of NA values in each column
+colSums(is.na(d.weather.tourist))
+
+```
+
+```{r message=FALSE, warning=FALSE }
+# Remove rows with NA in the 'Arrivals' column
+d.clean_data <- d.weather.tourist %>%
+  filter(!is.na(Arrivals))
+
+# Check again NA values in each column
+colSums(is.na(d.clean_data))
+```
+
+
+# Exploratory Data Analysis (EDA) 
+
+The following EDA focuses on three key variables: **Tourist Arrivals**, **Temperature**, and **Precipitation** in Switzerland between 2005 and 2023. The main aim of this analysis is to understand the distribution of each variable to identify **trends, patterns, outliers**, and other key statistical features that might influence tourism behavior or decision-making in the tourism sector. The EDA includes summary statistic, boxplots and histograms for each key variable to give a comprehensive view of their distribution. 
+
+## Summary Statistic
+
+The output below shows the summary statistics for three key variables: Arrivals, Temperature, and Precipitation. These statistics include the minimum, 1st quartile, median, mean, 3rd quartile:
+
+ * The number of **tourist arrivals** ranges from 0 to 223,091, with a median of 23 and a mean of 774.9. The large difference between the mean and median suggests a right-skewed distribution, indicating the presence of outliers or a few locations/dates with exceptionally high tourist arrivals.
+ 
+ * The recorded **temperatures** range from -7.2°C to 25.8°C, with a median of 10.1°C and a mean of 10.14°C. The summary shows that most of the temperature observations cluster around the mean value.This suggests a normal distribution.
+ 
+ * **Precipitation** values range from 0 to 586.7 mm, with a median of 81.2 mm and a mean of 94.54 mm. The distribution seems to have a moderate spread, with a significant difference between the minimum and maximum. This suggests a right-skewed distribution.
+ 
+```{r Summary Statistc}
+# Calculate the summary statistic
+summary(d.clean_data[, c("Arrivals", "Temperature", "Precipitation")])
+```
+
+
+## Arrivals Distribution
+
+The box plot and histogram below show that tourist arrivals variable has a **right-skewed distribution** with a large number of outliers. This suggests that while most observations represent low tourist arrivals, a few occasions had exceptionally high tourist activity (this may correspond to major events or high-demand periods).
+
+```{r Arrivals distribution}
+
+# Set up a 1x2 layout for the boxplot and histogram side by side
+par(mfrow = c(1, 2), oma = c(0, 0, 2, 0))  # `oma` adds outer margins for a common title
+
+# Creating boxplot for Arrivals variable
+boxplot(d.clean_data$Arrivals, 
+     main = "",  # Suppress individual plot title
+     xlab = "Tourist Arrivals",
+     horizontal = TRUE,   # Makes the box plot horizontal
+     col = "lightblue")
+
+# Create the histogram for Arrivals variable
+hist_data <- hist(d.clean_data$Arrivals, 
+     main = "",  # Suppress individual plot title
+     xlab = "Tourist Arrivals",
+     col = "lightblue", 
+     yaxt = 'n')  # Suppresses the default Y-axis
+
+# Customize the Y-axis to show values in thousands with 'K' label
+y_ticks <- axTicks(2)  # Get default Y-axis tick positions
+axis(2, at = y_ticks, labels = paste0(y_ticks / 1000, "K"), las = 1)
+
+# Add Y-axis label
+mtext("Frequency", side = 2, line = 3)
+
+# Add a common title in the center of the plot panel
+mtext("Tourist Arrivals Distribution (2005-2023)", outer = TRUE, cex = 1.5)
+```
+
+
+## Temperature Distribution
+
+The box plot and histogram below show that the temperature variables has a **normal distribution** with most values within moderate ranges. No significant extremes or outliers are present, indicating stable and predictable temperature conditions during the period analyzed.
+
+```{r Temperature distribution}
+
+# Set up a 1x2 layout for the boxplot and histogram side by side
+par(mfrow = c(1, 2), oma = c(0, 0, 2, 0))  # `oma` adds outer margins for a common title
+
+# Creating boxplot for Temperature variable
+boxplot(d.clean_data$Temperature, 
+     main = "",  # Suppress individual plot title
+     xlab = "Temperature",
+     horizontal = TRUE,   # Makes the box plot horizontal
+     col = "lightblue")
+
+# Create the histogram for Precipitation variable
+hist_data <- hist(d.clean_data$Temperature, 
+     main = "",  # Suppress individual plot title
+     xlab = "Temperature",
+     col = "lightblue", 
+     yaxt = 'n')  # Suppresses the default Y-axis
+
+# Customize the Y-axis to show values in thousands with 'K' label
+y_ticks <- axTicks(2)  # Get default Y-axis tick positions
+axis(2, at = y_ticks, labels = paste0(y_ticks / 1000, "K"), las = 1)
+
+# Add Y-axis label
+mtext("Frequency", side = 2, line = 3)
+
+# Add a common title in the center of the plot panel
+mtext("Temperature Distribution (2005-2023)", outer = TRUE, cex = 1.5)
+```
+
+
+## Precipitation Distribution
+
+The precipitation data is **skewed to the right**, with several outliers. The presence of outliers here may be indicative of heavy rainfall. Therefore, this should be analyzed further to understand their impact on tourism.
+
+```{r Precipitation distribution, message=FALSE, warning=FALSE}
+
+# Set up a 1x2 layout for the boxplot and histogram side by side
+par(mfrow = c(1, 2), oma = c(0, 0, 2, 0))  # `oma` adds outer margins for a common title
+
+# Creating boxplot for Precipitation variable
+boxplot(d.clean_data$Precipitation, 
+     main = "",  # Suppress individual plot title
+     xlab = "Precipitation",
+     horizontal = TRUE,   # Makes the box plot horizontal
+     col = "lightblue")
+
+# Create the histogram for Precipitation variable
+hist_data <- hist(d.clean_data$Precipitation, 
+     main = "",  # Suppress individual plot title
+     xlab = "Precipitation",
+     col = "lightblue", 
+     yaxt = 'n')  # Suppresses the default Y-axis
+
+# Customize the Y-axis to show values in thousands with 'K' label
+y_ticks <- axTicks(2)  # Get default Y-axis tick positions
+axis(2, at = y_ticks, labels = paste0(y_ticks / 1000, "K"), las = 1)
+
+# Add Y-axis label
+mtext("Frequency", side = 2, line = 3)
+
+# Add a common title in the center of the plot panel
+mtext("Precipitation Distribution (2005-2023)", outer = TRUE, cex = 1.5)
+
+```
+
+# Visualisation
+
+Once the EDA is complete, the next step is data visualization. This chapter provides a detailed analysis of tourist arrivals in Switzerland from 2005 to 2023, broken down by year, continent, country, canton, season, and origin to uncover significant trends and patterns that can inform policymakers and businesses within the tourism industry.
+
+## Tourist arrivals over time
+
+The graph below shows the trend of total tourist arrivals from 2005 to 2023. Here, we aim to provide an overview of how the numbers of tourists in Switzerland has developed during this period. To do this, we calculated the total number of tourists per year (**black line**) and the average (**red dashed line**) over the entire period.  
+
+```{r Arrivals over time, echo=FALSE}
+# Analyze arrival trends over time
+yearly_trends <- d.clean_data %>%
+  group_by(Year) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE))
+
+# Calculate the average total arrivals
+avg_total_arrivals <- yearly_trends %>%
+  summarise(avg_total_arrivals = mean(Total_Arrivals, na.rm = TRUE)) %>%
+  pull(avg_total_arrivals)
+
+# Plot the trend
+ggplot(yearly_trends, aes(x = Year, y = Total_Arrivals)) +
+  geom_line(color = "black") +
+  geom_point(color = "black") +
+  
+  # Add vertical lines for the COVID-19 period (e.g., 2020 and 2021)
+  geom_vline(xintercept = 2020, linetype = "dotted", color = "blue", linewidth = 1) +
+  geom_vline(xintercept = 2021, linetype = "dotted", color = "blue", linewidth = 1) +
+  
+  # Add horizontal line for the average total arrivals without showing it in the legend
+  geom_hline(aes(yintercept = avg_total_arrivals), linetype = "dashed", 
+             color = "red", linewidth = 1, show.legend = FALSE) +
+  
+  # Add label for the AVG line with comma separators and adjust the position for visibility
+  annotate("text", x = 2005.5, y = avg_total_arrivals + 700000,  # Adjust the position above the line
+           label = paste0("mean=", format(avg_total_arrivals, big.mark = ",")),
+           color = "red", 
+           fontface = "bold", size = 5, hjust = 0) +  # Left align the text
+  
+  # Add label for the COVID-19 period at the level of 20 million arrivals
+  annotate("text", x = 2020.5, y = 20000000,  # Set y to 20 million
+           label = "Covid-19", color = "blue", fontface = "bold", size = 5) +
+  
+  # Customize axis lines and remove background grid
+  labs(
+    title = "Tourist Arrivals Over Time (2005-2023)",
+    x = "Year",
+    y = "Total Arrivals (Millions)"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove background grid
+    axis.line = element_line(color = "black"),  # Add black lines to x and y axes
+    axis.text = element_text(color = "black"),  # Set axis text color to black
+    axis.ticks = element_line(color = "black"),  # Set axis ticks color to black
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),  # Rotate x-axis labels by 45 degrees
+    plot.title = element_text(hjust = 0.5)  # Center the plot title
+  ) +
+  
+  # Ensure the plot starts from 2005 and the x-axis has one-year intervals
+  scale_x_continuous(limits = c(2005, max(yearly_trends$Year)), breaks = seq(2005, max(yearly_trends$Year), by = 1), expand = c(0, 0)) +
+  
+  # Format the y-axis in millions and ensure breaks every 1 million
+  scale_y_continuous(labels = scales::label_number(scale = 1e-6, suffix = "M"),
+                     limits = c(0, 21e6), expand = c(0, 0),  # Set y-axis limits from 0 to 21million
+                     breaks = seq(1e6, 21e6, by = 1e6))  # Set y-axis breaks every 1 million
+                     
+```
+
+
+From 2005 to 2019, there was a steady increase in tourist numbers, with the exception of 2009, when the number of tourists fell slightly. This is probably due to the economic crisis in 2008. Until 2012, the number of tourists is below the average of the total number of tourists from 2005 to 2023, and from 2013 is is above. In 2020, we see the effects of the Covid-19 pandemic (**blue dotted line**) with a sharp decline in tourist numbers. Afterward, the decline quickly recovered, and by 2023 the numbers of tourists surpassed that of 2019.
+
+
+## Yearly Differences in Tourist Arrivals
+
+The graph below illustrates the year-over-year changes in tourist arrivals to Switzerland from 2005 to 2023. Each bar represents the difference in total arrivals compared to the previous year. Green bars indicate a positive difference (an increase in arrivals), while red bars indicate a negative difference (a decrease in arrivals). The goal is to identify the years with the largest decreases in tourist arrivals, the exact magnitude of these decreases, and the potential causes behind them.
+
+
+```{r Difference in arrivals over the years, message=FALSE, warning=FALSE}
+# Analyze arrival trends over time
+d.yearly.trends <- d.clean_data %>%
+  group_by(Year) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE))
+
+# Calculate the difference in arrivals year-to-year
+d.yearly.trends$Difference_in_Arrivals <- c(NA, diff(d.yearly.trends$Total_Arrivals))
+
+# Remove the first row with NA (since there's no previous year to compare for 2006)
+d.yearly.trends <- d.yearly.trends[-1, ]
+
+ggplot(d.yearly.trends, aes(x = Year, y = Difference_in_Arrivals, fill = Difference_in_Arrivals > 0)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_fill_manual(
+    values = c("red", "green"), # Red for negative, Green for positive
+    labels = c("Negative", "Positive")  # Custom labels for the legend
+  ) +   # Red for negative, Green for positive
+  geom_text(aes(label = ifelse(Difference_in_Arrivals < 0, 
+                               paste0(round(Difference_in_Arrivals / 1e6, 2), "M"), 
+                               "")), 
+            vjust = 1.1,  # Position the text below the red bars
+            color = "black") +  # Text color
+  labs(title = "Difference in Arrivals Over Years",
+       x = "Year",
+       y = "Difference in Arrivals (Millions)") +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove background grid
+    axis.line = element_line(color = "black"),  # Add black lines to x and y axes
+    axis.ticks = element_line(color = "black"),  # Set axis ticks color to black
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),  # Rotate x-axis labels by 45 degrees
+    plot.title = element_text(hjust = 0.5)) +  
+  scale_x_continuous(limits = c(2005, max(d.yearly.trends$Year)), 
+                     breaks = seq(min(d.yearly.trends$Year), max(d.yearly.trends$Year), by = 1), 
+                     expand = c(0, 0)) +  
+  scale_y_continuous(labels = label_number(scale = 1e-6, suffix = "M"),  # Y-axis in millions
+                     breaks = seq(floor(min(d.yearly.trends$Difference_in_Arrivals) / 1e6) * 1e6, 
+                                  ceiling(max(d.yearly.trends$Difference_in_Arrivals) / 1e6) * 1e6, 
+                                  by = 1e6))
+```
+
+This graph shows that in 2009, tourist arrivals decreased by **0.43 million** compared to 2008, likely due to the global financial crisis. A much larger drop occurred in 2020, with a decline of **9.06 million** arrivals compared to 2019, likely due to the COVID-19 pandemic. These observations align with the overall trend shown in the plot of tourist arrivals over time. 
+
+
+## Tourist Arrivals by Continent
+
+The bar chart illustrates the total number of tourist arrivals to Switzerland from various continents over the period 2005 to 2023. Here, we aim to identify the continent that provides the highest number of tourists to Switzerland. This insight would be beneficial for companies within the tourism industry to shape marketing strategies, focusing promotional efforts, and tailoring services to cater to the specific needs of tourists from the most significant regions.
+
+```{r Total Arrivals grouped by continent}
+# Summarize arrivals by Continent from 2005 to 2023
+continent_trends <- d.clean_data %>%
+  group_by(Continent) %>%
+  summarise(Total_Arrivals = sum(Arrivals))
+
+
+# Bar plot comparing arrivals by continent
+ggplot(continent_trends, aes(x = Continent, 
+                             y = Total_Arrivals, 
+                             fill = Continent)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Total Tourist Arrivals by Continent (2005-2023)",
+    x = "Continent",
+    y = "Total Arrivals (Millions)"
+  ) +
+  
+  # Format the y-axis in millions with a 20M interval
+  scale_y_continuous(labels = number_format(scale = 1e-6, suffix = "M", big.mark = ","),
+                     breaks = seq(0, max(c(260e6, continent_trends$Total_Arrivals)), by = 20e6)) +
+  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove background grid
+    axis.line = element_line(color = "black"),  # Add X and Y axis lines
+    axis.ticks = element_line(color = "black"),  # Add axis ticks
+    axis.title.x = element_text(size = 12),  # Display x-axis label
+    axis.title.y = element_text(size = 12),  # Display y-axis label
+    axis.text.x = element_text(size = 10),  # Show x-axis text labels
+    axis.text.y = element_text(size = 10),  # Adjust y-axis text size
+    plot.title = element_text(hjust = 0.5)   # Center the title
+  )
+```
+
+
+This chart shows that Europe accounts for the highest number of tourist arrivals, with a total of **258 million**, while other continents contribute significantly less.
+
+## Analyse Trends in the top ten Countries
+
+The horizontal bar chart below shows the total number of tourist arrivals in Switzerland from the top 10 countries over the period 2005 to 2023. The goal is to identify the top ten Countries that provides the highest number of tourists to Switzerland. This insight would be beneficial for policymakers to develop bilateral tourism agreements, such as tourism investment partnerships, air travel Cooperation, and visa facilitation. 
+
+```{r top ten countries, message=FALSE, warning=FALSE}
+# Summarize arrivals by top ten country
+country_trends <- d.clean_data %>%
+  group_by(Country) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE)) %>%
+  arrange(desc(Total_Arrivals)) %>% 
+  head(10)
+
+# Plot the trend
+ggplot(country_trends, aes(x = reorder(Country, Total_Arrivals), 
+                             y = Total_Arrivals, 
+                             fill = Country)) +
+  geom_bar(stat = "identity") +
+  
+  # Adjust labels to bring them closer to the bars
+  geom_text(aes(label = formatC(Total_Arrivals, format = "d", big.mark = ",")),  
+            hjust = - 0.01,  # Adjust this value to move labels closer
+            color = "black", 
+            size = 3.5) +
+  
+  # Add title and axis labels
+  labs(title = "Top 10 Countries by Tourist Arrivals (2005-2023)", 
+       x = "Countries",  # Label for x-axis
+       y = "Total Arrivals") +     # Label for y-axis
+  
+  # Remove grid and axis lines, but keep axis titles and text
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove background grid
+    axis.line = element_blank(),   # Remove axis lines
+    axis.ticks = element_blank(),  # Remove axis ticks
+    axis.title.x = element_text(size = 12),  # Display x-axis label
+    axis.title.y = element_text(size = 12),  # Display y-axis label
+    axis.text.x = element_blank(),  # Remove total arrival numbers on the x-axis
+    axis.text.y = element_text(size = 10),   # Adjust y-axis text size (country names)
+    plot.title = element_text(hjust = 0.5)   # Center the title
+  ) +
+  
+  coord_flip() +  # Flip coordinates for horizontal bars
+  
+  theme(legend.position = "none") +  # Remove legend
+  
+  expand_limits(y = max(country_trends$Total_Arrivals) * 1.2)  # Expand y-axis limit slightly for text visibility
+
+
+```
+
+This chart shows that Switzerland’s domestic tourism far outnumbers arrivals from other countries, with Germany contributing significantly, though its numbers are **over four times lower** than Switzerland’s. The United States, the United Kingdom, and France form a closely matched group in terms of tourist arrivals, each having **between 12 and 15 million** visitors. The remaining countries have numbers, **ranging from 3 to 9 million** visitors each.
+When we look again at the trend analysis by continent, domestic tourism accounts for just over half of European tourism. If domestic tourism is subtracted, the results is around 101 million tourists from other European countries. Nevertheless, Europeans still make up the largest proportion of tourists in Switzerland.
+
+## Seasonal Tourism Patterns
+
+The stacked chart below shows the seasonal breakdown of tourist arrivals in Switzerland, categorized by domestic and international tourists from 2005 to 2023. We are examining the number of tourists per season and comparing the proportion of Swiss and international tourists during this period. This insight can be beneficial for policymakers and businesses operating within the tourism industry by helping to optimize resource allocation, and planning events.
+
+```{r Arrivals by Season and Origin, message=FALSE, warning=FALSE}
+# Summarize arrivals by origin and season
+origin_season_trends <- d.clean_data %>%
+  group_by(Origin, Season) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE))
+
+# Stacked bar plot of seasonal trends by origin with labels, without y-axis 
+# values and grid background
+
+ggplot(origin_season_trends, aes(x = Season, 
+                                 y = Total_Arrivals, 
+                                 fill = Origin)) +
+  geom_bar(stat = "identity", position = "stack") +  # Stacked bar
+  geom_text(aes(label = scales::comma(Total_Arrivals, accuracy = 1)),  # Add labels
+            position = position_stack(vjust = 0.5),  # Position labels inside the stacked bars
+            color = "black",  # Set label color for readability
+            size = 4) +  # Adjust text size
+  labs(
+    title = "Seasonal Tourist Arrivals: Domestic vs. International (2005-2023)",
+    x = "Season",
+    y = "Total Arrivals"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_blank(),  # Remove y-axis text
+    axis.ticks.y = element_blank(),  # Remove y-axis ticks
+    panel.grid = element_blank(),  # Remove all grid lines
+    panel.background = element_blank(),  # Remove the background panel
+    plot.title = element_text(hjust = 0.5)  # Center the plot title
+  )
+
+```
+
+
+This chart illustrates that **summer is the peak season** for tourist arrivals, followed by autumn, spring, and then winter, which sees the lowest total arrivals. Summer and spring tend to attract more international tourists, while domestic tourism is stronger in autumn and winter. Notably, spring has the most balanced distribution between domestic and international tourists.
+
+## Tourist Arrivals trend by Origin
+
+The graph below tracks the trend of domestic (orange line) and international (cyan line) tourist arrivals in Switzerland from 2005 to 2023. The goal is to compare how each group of tourists has changed over time and how the COVID-19 pandemic impacted these trends. These insights can be beneficial for policymakers in implementing sustainability initiatives and over-tourism management strategies.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+# Summarize arrivals by origin and season
+origin_year_trends <- d.clean_data %>%
+  group_by(Origin, Year) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE), 
+            .groups = 'drop') # Ensure 'Year' is preserved
+
+## Domestic vs. International arrival line plot overtime 
+ggplot(origin_year_trends %>% filter(Year >= 2005),  # Filter data to include only years from 2005 onwards
+       aes(x = Year, 
+           y = Total_Arrivals, 
+           color = Origin, 
+           group = Origin)) +
+  geom_line() +
+  geom_point() +
+  
+  # Add labels for 2019 and 2020 with bold text and corresponding color
+  geom_text(data = origin_year_trends %>% filter(Year %in% c(2020)),
+            aes(label = scales::comma(Total_Arrivals), color = Origin),  # Color according to Origin
+            vjust = -1,  # Adjust the position of the labels
+            size = 3.5,
+            fontface = "bold") +  # Make the text bold
+  labs(
+    title = "Domestic vs. International Tourist Arrivals Over Time (2005-2023)",
+    x = "Year",
+    y = "Total Arrivals (Millions)"
+  ) +
+  scale_x_continuous(limits = c(2005, max(origin_year_trends$Year))) +  # Set the x-axis to start at 2005
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),  # Remove the background grid
+    axis.line.x = element_line(color = "black"),  # Add black x-axis
+    axis.line.y = element_line(color = "black"),   # Add black y-axis
+    axis.ticks = element_line(color = "black"), # Set axis ticks color to black
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)  # Rotate x-axis labels by 45 degrees
+  ) +
+  
+  # Ensure the plot starts from 2005 and the x-axis has one-year intervals
+  scale_x_continuous(limits = c(2005, max(d.yearly.trends$Year)), breaks = seq(2005, max(d.yearly.trends$Year), by = 1), expand = c(0, 0)) +
+  
+  # Format the y-axis in millions with breaks every 1 million
+  scale_y_continuous(breaks = seq(1e6, 11e6, by = 1e6),  # Breaks every 1 million
+                     limits = c(0, 11e6), expand = c(0, 0), # Ensure the y-axis ends at 11 million
+                     labels = scales::label_number(scale = 1e-6, suffix = "M")
+  ) 
+```
+
+This graph shows that from 2005 to 2019, both domestic and international tourist arrivals in Switzerland steadily increased, with international tourists consistently outnumbering domestic visitors. In 2020, due to COVID-19, international arrivals dropped to **3 million**, while domestic tourism was more resilient at **7.6 million** since local travel remained feasible. By 2021, domestic tourism rebounded quickly, surpassing international arrivals. In 2023, both groups showed strong recovery, but international tourism has yet to return to pre-pandemic levels, with domestic tourism still leading the way.
+
+
+## Tourism Distribution by Canton (Domestic vs. International Dynamics)
+
+The chart below compares the total tourist arrivals by canton in Switzerland, distinguishing between domestic (orange) and international (cyan) tourists, over the period 2005 to 2023. The goal is to identify the most and least visited cantons in Switzerland by BOTH domestic and international tourists. These insights can be beneficial for investments and business expansion decisions in various cantons.
+
+```{r Arrivals by canton and origin, message=FALSE, warning=FALSE}
+# Summarize arrivals by canton and origin
+origin_canton_trends <- d.clean_data %>%
+  group_by(Canton, Origin) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE), 
+            .groups = 'drop') # Ensure 'Year' is preserved
+
+# Plotting the total sum of arrivals by canton and origin
+ggplot(origin_canton_trends, aes(x = reorder(Canton, -Total_Arrivals), 
+                                 y = Total_Arrivals, 
+                                 fill = Origin)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  
+  # Add title and axis labels
+  labs(
+    title = "Tourist Arrivals by Canton: Domestic vs. International (2005-2023)",
+    x = "Canton",
+    y = "Total Arrivals (Millions)"
+  ) +
+  
+  # Format the y-axis in millions with decimal separators
+  scale_y_continuous(labels = number_format(scale = 1e-6, suffix = "M", big.mark = ",")) +
+  
+  # Apply theme settings
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
+    panel.grid = element_blank(),  # Remove grid background
+    axis.line.x = element_line(color = "black"),  # Add black x-axis
+    axis.line.y = element_line(color = "black"),   # Add black y-axis
+    axis.ticks = element_line(color = "black"), # Set axis ticks color to black
+  )
+
+```
+
+This chart shows that the most visited cantons by international tourists are Zurich, Geneva, Valais, and  Bern, while Bern, Graubünden, Valais, and Zurich attract the highest number of domestic tourists. On the other hand, Jura, Glarus, Appenzell Ausserrhoden, and Appenzell Innerrhoden have the fewest tourist arrivals overall.
+
+
+## Comparative Overview of Domestic vs International Tourist Arrivals
+
+The chart below compares the total number of domestic and international tourist arrivals in Switzerland from 2005 to 2023, helping to identify which group of tourists had more overall  arrivals. This insight assists tourism businesses in diversifying their customer base.
+
+```{r Origin trends,  message=FALSE, warning=FALSE}
+# Aggregate and Compare Totals
+# Summarize total arrivals by origin
+origin_trends <- d.clean_data %>%
+  group_by(Origin) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE))
+
+# Bar plot comparing domestic vs international arrivals
+ggplot(origin_trends, aes(x = Origin, 
+                          y = Total_Arrivals, 
+                          fill = Origin)) +
+  geom_bar(stat = "identity") +
+  
+  # Add text labels inside the bars
+  geom_text(aes(label = scales::comma(Total_Arrivals)),  # Format the numbers with commas
+            vjust = 1.5,  # Position the text inside the bars (adjust this if necessary)
+            color = "black",  # Set text color to black
+            size = 5) +  # Set text size
+  
+  labs(
+    title = "Total Domestic vs. International Tourist Arrivals",
+    x = "Origin",
+    y = "Total Arrivals"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_blank(),  # Remove y-axis text
+    axis.ticks.y = element_blank(),  # Remove y-axis ticks
+    panel.grid = element_blank(),  # Remove all grid lines
+    panel.background = element_blank(),  # Remove the background panel
+    plot.title = element_text(hjust = 0.5)  # Center the plot title
+  )
+```
+
+
+This chart shows that between 2005 and 2023, there were **156,710,798** domestic tourist arrivals and **157,921,240** international tourist arrivals in Switzerland. Therefore, international tourists slightly outnumbered domestic tourists during this period, showing a balanced tourism dynamic.
+
+## Top Cantons for International Tourists
+
+The bar charts illustrate the top 10 most visited Cantons by international tourists across the four seasons, highlighting preferences of international tourists. 
+
+```{r visited cantons by international, message=FALSE, warning=FALSE}
+# Combine data for all seasons fo top ten visited cantons by internationals
+all_season_data_i <- d.clean_data %>%
+  filter(Origin == "International", Season %in% c("Summer", "Autumn", "Spring", "Winter")) %>%
+  group_by(Canton, Season) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE)) %>%
+  arrange(desc(Total_Arrivals))
+
+
+# Select top 10 cantons for each season
+top_cantons_per_season <- all_season_data_i %>%
+  group_by(Season) %>%
+  top_n(10, Total_Arrivals)
+
+ggplot(top_cantons_per_season, aes(x = reorder(Canton, Total_Arrivals), 
+                                   y = Total_Arrivals, 
+                                   fill = Canton)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = scales::comma(Total_Arrivals, accuracy = 1)), 
+            hjust = -0.3, 
+            color = "black", 
+            size = 3.5) +
+  labs(
+    title = "Top 10 Cantons Visited by International Tourists ",
+    x = "Canton",
+    y = "Total Arrivals"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),  # Remove x-axis (y-axis after flip) text
+    axis.ticks.x = element_blank(),  # Remove x-axis (y-axis after flip) ticks
+    axis.text.y = element_text(angle = 0, hjust = 1),  # Rotate y-axis labels (x-axis before flip)
+    plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.position = "none",  # Remove the legend
+    panel.grid = element_blank(),  # Remove grid lines
+    panel.background = element_blank()  # Remove background
+  ) +
+  coord_flip() +  # Flip the coordinates to make it horizontal
+  facet_wrap(~ Season, scales = "free_y") +  # Facet by Season with independent y-axis
+  expand_limits(y = max(top_cantons_per_season$Total_Arrivals) * 1.5)  # Add more space to the right
+
+```
+
+"The charts show that Zurich consistently leads as the most visited canton across all seasons, with over **10 million** arrivals in the summer. Bern, Geneva, and Valais are also popular destinations, while smaller cantons like Graubünden and Ticino experience more seasonal fluctuations. Overall, Zurich dominates tourist arrivals year-round, particularly in the summer months.
+
+
+## Top Cantons for Domesitc tourists
+
+The bar charts illustrate the top 10 most visited Cantons by local tourists across the four seasons, highlighting preferences of domestic tourists.
+
+```{r visited cantons by domestic,  message=FALSE, warning=FALSE}
+# Combine data for all seasons fo top ten visited cantons by domestic
+all_season_data <- d.clean_data %>%
+  filter(Origin == "Domestic", Season %in% c("Summer", "Autumn", "Spring", "Winter")) %>%
+  group_by(Canton, Season) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE)) %>%
+  arrange(desc(Total_Arrivals))
+
+# Select top 10 cantons for each season
+top_cantons_per_season <- all_season_data %>%
+  group_by(Season) %>%
+  top_n(10, Total_Arrivals)
+
+ggplot(top_cantons_per_season, aes(x = reorder(Canton, Total_Arrivals), 
+                                   y = Total_Arrivals, 
+                                   fill = Canton)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = scales::comma(Total_Arrivals, accuracy = 1)), 
+            hjust = -0.3, 
+            color = "black", 
+            size = 3.5) +
+  labs(
+    title = "Top 10 Cantons Visited by Swiss Tourists ",
+    x = "Canton",
+    y = "Total Arrivals"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_blank(),  # Remove x-axis (y-axis after flip) text
+    axis.ticks.x = element_blank(),  # Remove x-axis (y-axis after flip) ticks
+    axis.text.y = element_text(angle = 0, hjust = 1),  # Rotate y-axis labels (x-axis before flip)
+    plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.position = "none",  # Remove the legend
+    panel.grid = element_blank(),  # Remove grid lines
+    panel.background = element_blank()  # Remove background
+  ) +
+  coord_flip() +  # Flip the coordinates to make it horizontal
+  facet_wrap(~ Season, scales = "free_y") +  # Facet by Season with independent y-axis
+  expand_limits(y = max(top_cantons_per_season$Total_Arrivals) * 1.5)  # Add more space to the right
+
+```
+
+The charts show that Bern consistently leads as the most visited canton across all seasons, except in winter. Graubünden, Valais, and Zurich are also popular destinations, while Ticino and Vaud attract many visitors, especially during the warmer months. On the other hand, smaller cantons like St. Gallen, Lucerne, and Basel-Stadt experience varying levels of tourist activity throughout the year. Notably, Graubünden dominates winter tourism with nearly **7 million** arrivals.
+
+
+## Attraction of the alpine regions in terms of number of tourists
+
+The charts below show tourist arrivals by season, region type (Alpine vs. Urban), and origin (Domestic vs. International) from 2005 to 2023. The goal is to assess Switzerland's attractiveness by examining whether tourists prefer its Alpine regions or its urban areas. Specifically, we want to explore if there are differences in the preferences of domestic and international tourists, and how these preferences vary by season. 
+To investigate this, we have categorized the following cantons as Alpine regions: 'Graubünden', 'Wallis', 'Bern', 'Uri', 'Obwalden', 'Nidwalden', 'Glarus', 'Schwyz', 'Tessin', 'Waadt', 'Fribourg', and 'St. Gallen'. The data is grouped by four key variables: Year, Season, Region Type (Alpine or Urban), and Tourist Origin (Domestic or International). For each group, we calculate the total number of arrivals by summing up the individual records.
+
+
+```{r Alpine region, message=FALSE, warning=FALSE}
+mountain_region <- c("Graubünden", "Wallis", "Bern", "Uri", "Obwalden", "Nidwalden", "Glarus", "Schwyz", "Tessin", "Waadt", "Fribourg", "St. Gallen")
+
+# Summarize arrivals by Season in mountain region vsother region 
+
+season_region_origin <- d.clean_data %>% 
+  mutate(Canton_Type = ifelse(Canton %in% mountain_region, "Alpine regions", 
+                              "Urban regions"))
+summary_seas_reg_orig <- season_region_origin %>% 
+  group_by(Year, Season, Canton_Type, Origin) %>%
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE)) %>%
+  ungroup()
+
+# Creating the combined diagram
+ggplot(summary_seas_reg_orig, aes(x = Year, y = Total_Arrivals, fill = Origin)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(Season ~ Canton_Type) +  #
+  labs(
+    title = "Tourist Arrivals by Season, Region Type, and Origin",
+    x = "Year",
+    y = "Total Arrivals",
+    fill = "Origin"
+  ) +
+  # Format the y-axis in millions with decimal separators
+  scale_y_continuous(labels = number_format(scale = 1e-5, suffix = "M", big.mark = ",")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.text = element_text(size = 6),  
+    legend.key.size = unit(0.5, "cm"),
+    axis.text.y = element_text(size = 6)
+  )
+
+
+```
+
+Between 2005 and 2023, urban regions consistently attracted more international tourists than the Alpine regions, regardless of the season. A similar trend is observed among domestic tourists, though the gap between urban and Alpine arrivals narrows during the winter months. Interestingly, domestic tourists outnumber international visitors in the Alpine regions, with international arrivals peaking during the summer. Seasonal data confirms that summer is the most popular period for tourism overall. Deviations in the patterns for 2020 and 2021 can be attributed to the impact of the Covid-19 pandemic.   
+
+The table below shows the difference between international and domestic arrivals for each region and season, aggregated across all years. It highlights the total number of arrivals by origin (domestic and international) and the resulting difference, providing insights into seasonal and regional tourism trends.
+
+```{r All arrivals acros all years, message=FALSE, warning=FALSE }
+# Summarize All Arrivals Across All Years:
+summary_all_years <- season_region_origin %>%
+  group_by(Season, Canton_Type, Origin) %>%  # Group by Season, Canton_Type, and Origin
+  summarise(Total_Arrivals = sum(Arrivals, na.rm = TRUE)) %>%  # Summarize the total arrivals
+  ungroup()
+
+# Reshape the data so International and Domestic are separate columns
+summary_wide <- summary_all_years %>%
+  spread(key = Origin, value = Total_Arrivals)  # Convert Origin (Domestic, International) into separate columns
+
+# Calculate the difference between International and Domestic arrivals
+summary_wide <- summary_wide %>%
+  mutate(Difference = International - Domestic)  # Calculate the difference
+
+# Print the result
+print(summary_wide)
+```
+
+**Alpine regions:** The number of domestic tourists exceeds that of international tourists in all seasons, with the greatest difference occurring in winter and autumn. In the winter season, the number of domestic tourists exceeded the number of international tourists in the Alpine regions by 6.8 million (15.9 million domestic tourists compared to 9.1 million international tourists).  In autumn, there were 15.7 million domestic tourists compared to 9.4 million international tourists, resulting in a difference of -6.3 million. 
+
+
+**Urban regions:** International tourists generally favour urban regions, with the number of international arrivals consistently higher compared to domestic arrivals, especially in summer and spring. In spring, urban areas recorded more international tourists (25.7 million) than domestic tourists (21.1 million), with a difference of 4.55 million in favour of international visitors. In summer, there was a strong influx of international tourists, with 37.5 million international tourists compared to 28.6 million domestic tourists. The difference of 8.9 million means that the number of international visitors in summer was significantly higher in urban regions.
+
+
+## Analyse trends of the weather data 
+
+The weather data comes from the following weather stations: Altdorf (UR), Binningen (BL), Zollikofen (BE), Davos (GR), Elm (GL), Engelberg (OW), Cointrin (GE), Lugano (TI), Lucerne (LU), Neuchâtel, (NE), Payerne (VD), Sion (VS), Zurich (ZH), St. Gallen (SG). To analyse these data, they had to be cleaned in a first step. Missing data for temperature and precipitation were filtered out.
+
+The boxplots below show the distribution of average temperatures across each month of all weather stations from 2005 to 2023.
+
+```{r Summarize temp across all years, message=FALSE, warning=FALSE }
+# Summarize temperature for each canton per month across all years
+# Clean the NA values in the columns 'Temperature' and 'Precipitation'
+d.clean_weather <- d.weather.tourist %>% 
+  filter(!is.na(Temperature) & !is.na(Precipitation))
+
+# Ensure the 'Month' column is a factor with levels ordered from January to December
+d.clean_weather <- d.clean_weather%>%
+  mutate(Month = factor(Month, levels = c("January", "February", "March", "April",
+                                          "May", "June", "July", "August", 
+                                          "September", "October", "November", 
+                                          "December")))
+
+
+# Create a boxplot of temperatures by month across all years
+ggplot(d.clean_weather, aes(x = Month, y = Temperature)) +  # Add 'fill = Month'
+  geom_boxplot() +  # Create a boxplot
+  labs(
+    title = "Average Temperature Distribution",
+    x = "Month",
+    y = "Temperature (°C)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(hjust = 0.5)  # Center the title
+  )
+```
+ 
+The temperatures clearly follow a seasonal pattern, with temperatures rising steadily from January, peaking in July-August and then dropping again towards December. January, February and December have the lowest temperatures, with a median of just over 0 °C, with the coldest temperature being reached in February at around -10 °C. The presence of outliers in the winter months (especially January and February) indicates occasional extremely cold temperatures in certain years or at certain weather stations. Summer months (June, July, and August) have the highest temperatures, with a median temperature between 15°C and 20°C. Spring and Autumn months (March, April, May for spring, and September, October, November for autumn) show transitional temperatures, with the median rising from around 5°C in March to around 10°C-15°C by May and falling again from September to November.
+
+
+The boxplots below show the distribution of total precipitation across each month of all weather stations from 2005 to 2023.
+
+```{r Summarize total precipitation,message=FALSE, warning=FALSE }
+# Create a boxplot of total precipitation by month across all years
+ggplot(d.clean_weather, aes(x = Month, y = Precipitation)) +  # Add 'fill = Month'
+  geom_boxplot() +  # Create a boxplot
+  labs(
+    title = "Total Precipitaiton Distribution",
+    x = "Month",
+    y = "Total Precipitation (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(hjust = 0.5)  # Center the title
+  )
+
+
+```
+
+This boxplots highlight that precipitation is relatively evenly distributed throughout the year, with summer months (especially July and August) experiencing the heaviest and most variable precipitation. This suggests that Switzerland may experience more frequent or intense rainstorms during the summer.
+The winter months show more consistent, moderate precipitation, with fewer extreme outliers, reflecting the steadier precipitation associated with cold-season weather. November also show some precipitation outliers. These may reflect occasional heavy rain events or early snowfall in certain years or at certain weather stations.
+
+
+
+# Data Modeling
+
+This analysis explores the relationship between average monthly temperature and tourist arrivals, as well as the impact of total monthly precipitation on tourist arrivals from 2005 to 2023.
+
+## Exploring the Impact of Temperature and Precipitation on Tourist Arrivals
+
+To analyse the relationship between monthly average temperatures and tourists, the total number of arrivals for each month over the years was calculated, and the average temperature was determined by aggregating the data from several weather stations. The linear regression below was used to analyse the extent to which temperature influences tourist activity.
+
+```{r linear regression Arrivals vs Temperature, message=FALSE, warning=FALSE}
+# Calculate the average temperature and precipitation by Year and Month_num
+monthly_averages <- d.weather.tourist %>%
+  group_by(Year, Month_num) %>%
+  summarize(
+    Avg_Temperature = mean(Temperature, na.rm = TRUE),
+    Avg_Precipitation = mean(Precipitation, na.rm = TRUE),
+    Sum_Arrivals = sum(Arrivals, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Scatter plot for Arrivals vs. Temperature with regression line
+ggplot(monthly_averages, aes(x = Avg_Temperature, y = Sum_Arrivals)) +
+  geom_point(alpha = 0.3) +  # Scatter plot points with some transparency
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +  # Regression line
+  labs(title = "Impact of Temperature on Tourist Arrivals",
+       x = "Average Temperature (°C)",
+       y = "Number of Arrivals") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+```
+
+The plot above shows that there is a clear positive trend between average temperature and tourist arrivals, suggesting that as temperatures rise, so do tourist numbers. While there is a general upward trend, the points are somewhat scattered around the regression line, indicating variability in the number of arrivals at a given temperature. This suggests that while temperature is an important factor, it is not the sole influence on tourist numbers. There are some points with relatively low arrival numbers despite higher temperatures and some points with high arrival numbers at lower temperatures. These could be outliers or cases where other factors, such as the COVID-19 pandemic, played a role.
+
+
+## Exploring the Impact of Precipitation on Tourist Arrivals
+
+The relationship between total monthly precipitation and tourist arrivals over the years was analyzed by aggregating data from multiple weather stations to calculate the average monthly precipitation. The  linear regression model below was then applied to examine this relationship.
+
+```{r linear regression Arrivals vs Precipitaion, message=FALSE, warning=FALSE}
+# Scatter plot for Arrivals vs. Precipitation with regression line
+ggplot(monthly_averages, aes(x = Avg_Precipitation, y = Sum_Arrivals)) +
+  geom_point(alpha = 0.3) +  # Scatter plot points with some transparency
+  geom_smooth(method = "lm", se = TRUE, color = "green") +  # Regression line
+  labs(title = "Impact of Precipitation on Tourist Arrivals",
+       x = "Average Precipitation (mm)",
+       y = "Number of Arrivals") +
+  theme_minimal() +
+  theme(
+  plot.title = element_text(hjust = 0.5)
+  )
+```
+
+The green line's slight positive slope suggests a weak positive relationship between precipitation and tourist arrivals. The scattered data points indicate a considerable variation in how precipitation affects tourist arrivals, with a broad range of arrival numbers observed at different precipitation levels. The 95% confidence interval widens as precipitation increases, highlighting that predictions for tourist arrivals become more uncertain as precipitation levels rise.
+
+
+## Correlation Analysis: Tourist Arrivals in Relation to Temperature and Precipitation
+
+The correlation matrix is calculated to assess the relationship between the dependent variable, total tourist arrivals, and the predictor variables, average temperature and average total precipitation. In the matrix, strong positive correlations (close to 1) are represented in blue, strong negative correlations (close to -1) are shown in red, while weak or no correlations (values near 0) are displayed in white.
+
+```{r Correlation,   message=FALSE, warning=FALSE }
+# Select relevant columns
+filtered_data <- monthly_averages %>%
+  select(Sum_Arrivals, Avg_Temperature, Avg_Precipitation)  
+
+# Calculate the correlation matrix
+cor_matrix <- cor(filtered_data, use = "complete.obs")  # Use complete.obs to handle missing values
+
+# Plot the correlation matrix with corrplot
+corrplot(cor_matrix, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 0, # Adjust text label color and rotation
+         addCoef.col = "black", # Add correlation coefficients in the plot
+         col = colorRampPalette(c("red", "white", "blue"))(200))  # Color scale from red (negative) to blue (positive)
+```
+
+The correlation factor of **0.72**  between temperature and tourist arrivals is strong (close to 1), it suggests that as average temperatures increase, tourist arrivals also tend to increase.
+
+A correlation of **0.34** for precipitation and tourist arrivals indicates a weak to moderate positive relationship. While it's not a strong correlation, it does suggest that there is some tendency for tourist arrivals to increase slightly with higher precipitation. However, the relationship isn't very strong, meaning other factors likely have more influence on tourist arrivals than precipitation does.
+
+## Analyzing Tourist Arrivals through Multiple Linear Regression: Temperature and Precipitation as   Predictors
+
+The function summarizes the regression model, providing detailed statistics on how well the model fits the data and the significance of each predictor variable. The main goal is to know how much each predictor impact on tourist arrivals.
+
+```{r Fit multiple regression,  message=FALSE, warning=FALSE }
+# Fit a multiple regression model with Arrivals as the dependent variable
+model <- lm(Sum_Arrivals ~ Avg_Temperature + Avg_Precipitation, 
+            data = monthly_averages)
+
+# View the summary of the model
+summary(model)
+```
+
+The regression model examines the relationship between tourist arrivals and the predictors: **average temperature** and **average precipitation**. 
+The intercept estimate suggests that when both predictors are zero, the model predicts 944,194 tourist arrivals. For each additional degree Celsius in temperature, tourist arrivals are expected to increase by 41,932.8. The p-value for temperature is very small (2e-16**), indicating that temperature has a very strong impact on tourist arrivals. However, the p-value for precipitation is failry large (p-value = 0.682), this means the precipitation has no impact tourist arrivals.
+
+The model explains about 52.2 % of the variation in tourist arrivals, as indicated by the Multiple R-squared, with an Adjusted R-squared of 51.81% accounting for the number of predictors. 
+
+
+# Conclusion
+
+**The Swiss hotel industry has witnessed a steady increase** in overnight stays from 2005 to 2023, reflecting the resilience of Switzerland’s tourism sector, which has successfully navigated global challenges like the 2008 economic crisis and the COVID-19 pandemic. By 2023, the country had fully recovered from the significant drop in tourist arrivals caused by the pandemic, even surpassing the levels seen in 2019. Domestic tourism, in particular, proved more resilient, recovering quickly by 2021, while international tourism saw a slower but steady rebound. As a result, by 2023, domestic tourism had slightly overtaken international arrivals, highlighting the continued importance of local travel in driving Switzerland's tourism recovery.
+
+**Seasonal variations play a key role in Swiss tourism**, with summer emerging as the peak season for both domestic and international visitors, followed by autumn and spring. This aligns with weather data that shows a clear correlation between higher temperatures and increased tourist activity. International tourists tend to favor the warmer months of summer and spring, while domestic tourists dominate in the cooler months of autumn and winter, particularly for winter sports activities. The colder months, though less popular among international tourists, remain attractive to Swiss travelers seeking alpine adventures.
+
+**In terms of regional preferences**, urban cantons like Zurich and Geneva are the top destinations for international tourists, drawing visitors with their cultural, business, and shopping opportunities. On the other hand, domestic tourists are more inclined to visit the Alpine cantons, such as Graubünden, Valais, and Bern, especially during the winter season for skiing and other outdoor activities. Nevertheless, summer remains the most popular time for international tourists to visit these alpine regions, as they seek outdoor experiences in the mountains, from hiking to sightseeing.
+
+**In terms of weather impact on tourist dynamics in Switzerland**, temperature has a very strong influence on overall arrivals. As temperatures rise, the number of tourist arrivals increases, while precipitation does not have an effect on arrival numbers. 
