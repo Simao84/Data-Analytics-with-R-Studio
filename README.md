@@ -31,8 +31,8 @@ The main objectives of this project are:
 
 ## Data Sources
 The data used for this project comprises two key datasets:
-1. **Tourist Arrivals Data**: Data from 2005 to 2023, containing detailed tourist arrivals by canton, year, and source country (local and international tourists).
-2. **Weather Data**: Provides weather information from 14 different weather stations, covering the major climatic regions of Switzerland.
+1. [**Tourist Arrivals Data**](https://www.meteoswiss.admin.ch/#tab=forecast-map): Data from 2005 to 2023, containing detailed tourist arrivals by canton, year, and source country (local and international tourists).
+2. [**Weather Data**](https://www.pxweb.bfs.admin.ch/pxweb/en/px-x-1003020000_102/-/px-x-1003020000_102.px/): Provides weather information from 14 different weather stations, covering the major climatic regions of Switzerland.
 
 ## Project Structure
 The R Markdown document is structured as follows:
