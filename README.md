@@ -15,7 +15,7 @@
 - [License](#license)
 
 ## Overview
-This project aims to analyze tourist arrivals in Switzerland, focusing on the most visited destinations by both domestic and international guests. By linking tourist behaviors with weather patterns across different cantons, the study seeks to provide insights into the dynamics of tourism in Switzerland, which can help policymakers and businesses in decision-making.
+This project aims to analyze tourist arrivals in Switzerland from 2005 to 2023, focusing on the most visited destinations by both domestic and international guests. By linking tourist behaviors with weather patterns across different cantons, the study seeks to provide insights into the dynamics of tourism in Switzerland, which can help policymakers and businesses in decision-making.
 
 ## Project Objectives
 The main objectives of this project are:
