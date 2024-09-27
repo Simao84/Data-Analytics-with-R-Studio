@@ -1,4 +1,4 @@
-# Data-Analytics-with-R-Studio
+# Data-Analytics-With-R-Studio
 
 # Tourism Dynamics and Weather Impact on Tourist Arrivals in Switzerland
 
